@@ -12,15 +12,15 @@ $pass = getenv('ALSO_PASS');
 logLine("SCRIPT VERSION 3");
 
 // start from first known useful range
-$startCategory = 6;
-$startGroup = 1;
-$startProperty = 1;
+// $startCategory = 6;
+// $startGroup = 1;
+// $startProperty = 1;
 
 $maxCategory = 21;
 $maxGroup = 14;
 $maxProperty = 27;
 
-$maxRequests = 200;
+$maxRequests = 2000;
 
 if (!$user || !$pass) {
     fwrite(STDERR, "Missing ALSO_USER or ALSO_PASS environment variables\n");
@@ -90,14 +90,12 @@ function getPhilipsProductsXml(string $xml): array
     if (!$loaded) {
         $errors = libxml_get_errors();
         libxml_clear_errors();
-        fwrite(STDERR, "DEBUG DOM loadXML failed\n");
         return [];
     }
 
     libxml_clear_errors();
 
     $nodes = $dom->getElementsByTagName('product');
-    fwrite(STDERR, "DEBUG DOM parsed products: " . $nodes->length . "\n");
 
     $i = 0;
     foreach ($nodes as $node) {
@@ -110,9 +108,6 @@ function getPhilipsProductsXml(string $xml): array
             $vendor = strtoupper(trim($vendorNodes->item(0)->textContent));
         }
 
-        if ($i < 5) {
-            fwrite(STDERR, "DEBUG product {$i}: groupId=[{$groupId}] vendor=[{$vendor}]\n");
-        }
         $i++;
 
         if ($groupId === 'PHILIPS' || $vendor === 'PHILIPS') {
@@ -166,8 +161,6 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
             if ($xml !== null) {
                 $preview = substr($xml, 0, 500);
                 $preview = str_replace(["\r", "\n", "\t"], ['\\r', '\\n', '\\t'], $preview);
-                logLine("{$propertyId} -> RAW PREVIEW: {$preview}");
-                logLine("{$propertyId} -> RAW LENGTH: " . strlen($xml));
             }
 
             if ($xml === null || $xml === '') {
