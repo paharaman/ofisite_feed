@@ -9,17 +9,17 @@ $baseUrl = 'https://b2b.also.com/invoke/ActDelivery_HTTP.Inbound/receiveXML_API'
 $user = getenv('ALSO_USER');
 $pass = getenv('ALSO_PASS');
 
+// start from first known Philips-containing feed
+$startCategory = 2;
+$startGroup = 7;
+$startProperty = 22;
+
 $maxCategory = 21;
 $maxGroup = 14;
 $maxProperty = 27;
 
-$maxRequests = 200; 
-
-// safety limit, за да не виси безкрайно
-$maxRequests = 1200;
-
-// ако искаш за тест, намали на 200
-// $maxRequests = 200;
+// safety cap for GitHub Actions runtime
+$maxRequests = 200;
 
 if (!$user || !$pass) {
     fwrite(STDERR, "Missing ALSO_USER or ALSO_PASS environment variables\n");
@@ -72,7 +72,7 @@ function isMissingFeed(string $xml): bool
 function isEmptyFeed(SimpleXMLElement $sx): bool
 {
     $attrs = $sx->attributes();
-    return isset($attrs['ItemsCollected']) && (string)$attrs['ItemsCollected'] === '0';
+    return isset($attrs['ItemsCollected']) && (string) $attrs['ItemsCollected'] === '0';
 }
 
 function getPhilipsProductsXml(SimpleXMLElement $sx): array
@@ -81,7 +81,7 @@ function getPhilipsProductsXml(SimpleXMLElement $sx): array
 
     foreach ($sx->product as $product) {
         $attrs = $product->attributes();
-        $groupId = isset($attrs['groupId']) ? trim((string)$attrs['groupId']) : '';
+        $groupId = isset($attrs['groupId']) ? trim((string) $attrs['groupId']) : '';
 
         if (strcasecmp($groupId, 'Philips') === 0) {
             $products[] = $product->asXML();
@@ -99,16 +99,21 @@ $totalEmptyFeeds = 0;
 $totalMissingFeeds = 0;
 
 logLine("START");
+logLine("Starting from X" . sprintf('%02d%03d%03d', $startCategory, $startGroup, $startProperty));
 
-for ($c = 1; $c <= $maxCategory; $c++) {
+for ($c = $startCategory; $c <= $maxCategory; $c++) {
     $categoryHadAnyValidFeed = false;
     logLine("Category {$c} start");
 
-    for ($g = 1; $g <= $maxGroup; $g++) {
+    $groupStart = ($c === $startCategory) ? $startGroup : 1;
+
+    for ($g = $groupStart; $g <= $maxGroup; $g++) {
         $groupHadAnyValidFeed = false;
         logLine("  Group {$g} start");
 
-        for ($p = 1; $p <= $maxProperty; $p++) {
+        $propertyStart = ($c === $startCategory && $g === $startGroup) ? $startProperty : 1;
+
+        for ($p = $propertyStart; $p <= $maxProperty; $p++) {
             if ($totalRequests >= $maxRequests) {
                 logLine("Reached maxRequests={$maxRequests}, stopping");
                 break 3;
@@ -139,7 +144,6 @@ for ($c = 1; $c <= $maxCategory; $c++) {
 
             libxml_use_internal_errors(true);
             $sx = simplexml_load_string($xml);
-            $parseErrors = libxml_get_errors();
             libxml_clear_errors();
 
             if ($sx === false) {
@@ -185,11 +189,12 @@ $output .= "<productSet version=\"1.7\" ItemsCollected=\"{$totalProducts}\">\n";
 $output .= implode("\n", $productXmlList);
 $output .= "\n</productSet>\n";
 
-if (!is_dir(__DIR__ . '/../docs')) {
-    mkdir(__DIR__ . '/../docs', 0777, true);
+$docsDir = __DIR__ . '/../docs';
+if (!is_dir($docsDir)) {
+    mkdir($docsDir, 0777, true);
 }
 
-file_put_contents(__DIR__ . '/../docs/feed.xml', $output);
+file_put_contents($docsDir . '/feed.xml', $output);
 
 logLine("DONE");
 logLine("Requests: {$totalRequests}");
