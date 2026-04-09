@@ -7,29 +7,51 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
-  build:
+  build-feed:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
 
-      - name: Run script
+      - name: Ensure docs folder exists
+        run: mkdir -p docs
+
+      - name: Run feed builder
         env:
           ALSO_USER: ${{ secrets.ALSO_USER }}
           ALSO_PASS: ${{ secrets.ALSO_PASS }}
         run: php scripts/build_feed.php
 
-      - name: Commit feed.xml
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add docs/feed.xml
-          git diff --cached --quiet || git commit -m "Update feed"
-          git push
+      - name: Add .nojekyll
+        run: touch docs/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build-feed
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
