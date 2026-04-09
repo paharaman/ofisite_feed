@@ -81,9 +81,23 @@ function getPhilipsProductsXml(SimpleXMLElement $sx): array
 
     foreach ($sx->product as $product) {
         $attrs = $product->attributes();
-        $groupId = isset($attrs['groupId']) ? trim((string) $attrs['groupId']) : '';
 
-        if (strcasecmp($groupId, 'Philips') === 0) {
+        $groupId = '';
+        if (isset($attrs['groupId'])) {
+            $groupId = trim((string)$attrs['groupId']);
+        }
+
+        $vendor = '';
+        if (isset($product->vendor)) {
+            $vendor = trim((string)$product->vendor);
+        }
+
+        $groupIdNormalized = strtoupper($groupId);
+        $vendorNormalized = strtoupper($vendor);
+
+        fwrite(STDERR, "DEBUG groupId=[{$groupId}] vendor=[{$vendor}]\n");
+
+        if ($groupIdNormalized === 'PHILIPS' || $vendorNormalized === 'PHILIPS') {
             $products[] = $product->asXML();
         }
     }
