@@ -1,7 +1,5 @@
 <?php
 
-logLine("SCRIPT VERSION 2");
-
 set_time_limit(0);
 ini_set('output_buffering', 'off');
 ini_set('zlib.output_compression', '0');
@@ -11,7 +9,9 @@ $baseUrl = 'https://b2b.also.com/invoke/ActDelivery_HTTP.Inbound/receiveXML_API'
 $user = getenv('ALSO_USER');
 $pass = getenv('ALSO_PASS');
 
-// start from first known Philips-containing feed
+logLine("SCRIPT VERSION 3");
+
+// start from first known useful range
 $startCategory = 6;
 $startGroup = 1;
 $startProperty = 1;
@@ -20,7 +20,6 @@ $maxCategory = 21;
 $maxGroup = 14;
 $maxProperty = 27;
 
-// safety cap for GitHub Actions runtime
 $maxRequests = 200;
 
 if (!$user || !$pass) {
@@ -71,29 +70,45 @@ function isMissingFeed(string $xml): bool
     return stripos($xml, "<error>Can't find any materials for propertyId") !== false;
 }
 
-function isEmptyFeed(SimpleXMLElement $sx): bool
+function getItemsCollectedFromXml(string $xml): int
 {
-    $attrs = $sx->attributes();
-    return isset($attrs['ItemsCollected']) && (string) $attrs['ItemsCollected'] === '0';
+    if (preg_match('/ItemsCollected="(\d+)"/i', $xml, $m)) {
+        return (int)$m[1];
+    }
+    return -1;
 }
 
-function getPhilipsProductsXml(SimpleXMLElement $sx): array
+function getPhilipsProductsXml(string $xml): array
 {
     $products = [];
 
-    $allProducts = $sx->xpath('//product');
+    $dom = new DOMDocument();
+    libxml_use_internal_errors(true);
 
-    if ($allProducts === false) {
-        fwrite(STDERR, "DEBUG xpath('//product') returned false\n");
+    $loaded = $dom->loadXML($xml, LIBXML_NOCDATA | LIBXML_NONET);
+
+    if (!$loaded) {
+        $errors = libxml_get_errors();
+        libxml_clear_errors();
+        fwrite(STDERR, "DEBUG DOM loadXML failed\n");
         return [];
     }
 
-    fwrite(STDERR, "DEBUG total parsed products: " . count($allProducts) . "\n");
+    libxml_clear_errors();
+
+    $nodes = $dom->getElementsByTagName('product');
+    fwrite(STDERR, "DEBUG DOM parsed products: " . $nodes->length . "\n");
 
     $i = 0;
-    foreach ($allProducts as $product) {
-        $groupId = strtoupper(trim((string)$product['groupId']));
-        $vendor  = strtoupper(trim((string)$product->vendor));
+    foreach ($nodes as $node) {
+        /** @var DOMElement $node */
+        $groupId = strtoupper(trim($node->getAttribute('groupId')));
+
+        $vendor = '';
+        $vendorNodes = $node->getElementsByTagName('vendor');
+        if ($vendorNodes->length > 0) {
+            $vendor = strtoupper(trim($vendorNodes->item(0)->textContent));
+        }
 
         if ($i < 5) {
             fwrite(STDERR, "DEBUG product {$i}: groupId=[{$groupId}] vendor=[{$vendor}]\n");
@@ -101,7 +116,7 @@ function getPhilipsProductsXml(SimpleXMLElement $sx): array
         $i++;
 
         if ($groupId === 'PHILIPS' || $vendor === 'PHILIPS') {
-            $products[] = $product->asXML();
+            $products[] = $dom->saveXML($node);
         }
     }
 
@@ -159,26 +174,22 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
                 break;
             }
 
-            libxml_use_internal_errors(true);
-            $sx = simplexml_load_string($xml);
-            libxml_clear_errors();
-
-            if ($sx === false) {
-                logLine("    {$propertyId} -> invalid XML, continue");
-                continue;
-            }
-
-            if (isEmptyFeed($sx)) {
+            $itemsCollected = getItemsCollectedFromXml($xml);
+            if ($itemsCollected === 0) {
                 $totalEmptyFeeds++;
                 logLine("    {$propertyId} -> empty feed");
                 continue;
+            }
+
+            if ($itemsCollected < 0) {
+                logLine("    {$propertyId} -> could not read ItemsCollected");
             }
 
             $groupHadAnyValidFeed = true;
             $categoryHadAnyValidFeed = true;
             $totalValidFeeds++;
 
-            $philipsProducts = getPhilipsProductsXml($sx);
+            $philipsProducts = getPhilipsProductsXml($xml);
             $count = count($philipsProducts);
 
             logLine("    {$propertyId} -> valid feed, Philips products: {$count}");
