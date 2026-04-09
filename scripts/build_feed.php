@@ -163,6 +163,13 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
 
             $xml = fetchXml($url);
 
+            if ($xml !== null) {
+                $preview = substr($xml, 0, 500);
+                $preview = str_replace(["\r", "\n", "\t"], ['\\r', '\\n', '\\t'], $preview);
+                logLine("{$propertyId} -> RAW PREVIEW: {$preview}");
+                logLine("{$propertyId} -> RAW LENGTH: " . strlen($xml));
+            }
+
             if ($xml === null || $xml === '') {
                 logLine("    {$propertyId} -> null/empty response");
                 continue;
