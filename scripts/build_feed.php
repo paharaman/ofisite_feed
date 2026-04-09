@@ -9,18 +9,17 @@ $baseUrl = 'https://b2b.also.com/invoke/ActDelivery_HTTP.Inbound/receiveXML_API'
 $user = getenv('ALSO_USER');
 $pass = getenv('ALSO_PASS');
 
-logLine("SCRIPT VERSION 3");
-
-// start from first known useful range
-// $startCategory = 6;
-// $startGroup = 1;
-// $startProperty = 1;
+// старт от първия потвърден работещ Philips feed
+$startCategory = 6;
+$startGroup = 1;
+$startProperty = 1;
 
 $maxCategory = 21;
 $maxGroup = 14;
 $maxProperty = 27;
 
-$maxRequests = 2000;
+// лимит за заявки на един run
+$maxRequests = 1000;
 
 if (!$user || !$pass) {
     fwrite(STDERR, "Missing ALSO_USER or ALSO_PASS environment variables\n");
@@ -38,12 +37,18 @@ function fetchXml(string $url): ?string
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 6,
-        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_USERAGENT => 'Philips-Aggregator/1.0',
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
         CURLOPT_HTTPGET => true,
+        CURLOPT_ENCODING => '',
+        CURLOPT_HTTPHEADER => [
+            'Accept: application/xml,text/xml,*/*',
+            'Cache-Control: no-cache',
+            'Pragma: no-cache',
+        ],
     ]);
 
     $response = curl_exec($ch);
@@ -65,16 +70,22 @@ function fetchXml(string $url): ?string
     return trim($response);
 }
 
+function isLoginError(string $xml): bool
+{
+    return stripos($xml, 'Login error. Please check provided login') !== false;
+}
+
 function isMissingFeed(string $xml): bool
 {
-    return stripos($xml, "<error>Can't find any materials for propertyId") !== false;
+    return stripos($xml, "Can't find any materials for propertyId") !== false;
 }
 
 function getItemsCollectedFromXml(string $xml): int
 {
     if (preg_match('/ItemsCollected="(\d+)"/i', $xml, $m)) {
-        return (int)$m[1];
+        return (int) $m[1];
     }
+
     return -1;
 }
 
@@ -86,18 +97,14 @@ function getPhilipsProductsXml(string $xml): array
     libxml_use_internal_errors(true);
 
     $loaded = $dom->loadXML($xml, LIBXML_NOCDATA | LIBXML_NONET);
+    libxml_clear_errors();
 
     if (!$loaded) {
-        $errors = libxml_get_errors();
-        libxml_clear_errors();
         return [];
     }
 
-    libxml_clear_errors();
-
     $nodes = $dom->getElementsByTagName('product');
 
-    $i = 0;
     foreach ($nodes as $node) {
         /** @var DOMElement $node */
         $groupId = strtoupper(trim($node->getAttribute('groupId')));
@@ -107,8 +114,6 @@ function getPhilipsProductsXml(string $xml): array
         if ($vendorNodes->length > 0) {
             $vendor = strtoupper(trim($vendorNodes->item(0)->textContent));
         }
-
-        $i++;
 
         if ($groupId === 'PHILIPS' || $vendor === 'PHILIPS') {
             $products[] = $dom->saveXML($node);
@@ -158,14 +163,14 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
 
             $xml = fetchXml($url);
 
-            if ($xml !== null) {
-                $preview = substr($xml, 0, 500);
-                $preview = str_replace(["\r", "\n", "\t"], ['\\r', '\\n', '\\t'], $preview);
-            }
-
             if ($xml === null || $xml === '') {
                 logLine("    {$propertyId} -> null/empty response");
                 continue;
+            }
+
+            if (isLoginError($xml)) {
+                logLine("    {$propertyId} -> LOGIN ERROR, stopping script");
+                break 3;
             }
 
             if (isMissingFeed($xml)) {
@@ -175,6 +180,7 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
             }
 
             $itemsCollected = getItemsCollectedFromXml($xml);
+
             if ($itemsCollected === 0) {
                 $totalEmptyFeeds++;
                 logLine("    {$propertyId} -> empty feed");
@@ -183,6 +189,7 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
 
             if ($itemsCollected < 0) {
                 logLine("    {$propertyId} -> could not read ItemsCollected");
+                continue;
             }
 
             $groupHadAnyValidFeed = true;
