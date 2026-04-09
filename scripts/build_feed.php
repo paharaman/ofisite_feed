@@ -1,5 +1,7 @@
 <?php
 
+logLine("SCRIPT VERSION 2");
+
 set_time_limit(0);
 ini_set('output_buffering', 'off');
 ini_set('zlib.output_compression', '0');
