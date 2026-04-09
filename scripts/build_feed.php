@@ -81,25 +81,26 @@ function getPhilipsProductsXml(SimpleXMLElement $sx): array
 {
     $products = [];
 
-    foreach ($sx->product as $product) {
-        $attrs = $product->attributes();
+    $allProducts = $sx->xpath('//product');
 
-        $groupId = '';
-        if (isset($attrs['groupId'])) {
-            $groupId = trim((string)$attrs['groupId']);
+    if ($allProducts === false) {
+        fwrite(STDERR, "DEBUG xpath('//product') returned false\n");
+        return [];
+    }
+
+    fwrite(STDERR, "DEBUG total parsed products: " . count($allProducts) . "\n");
+
+    $i = 0;
+    foreach ($allProducts as $product) {
+        $groupId = strtoupper(trim((string)$product['groupId']));
+        $vendor  = strtoupper(trim((string)$product->vendor));
+
+        if ($i < 5) {
+            fwrite(STDERR, "DEBUG product {$i}: groupId=[{$groupId}] vendor=[{$vendor}]\n");
         }
+        $i++;
 
-        $vendor = '';
-        if (isset($product->vendor)) {
-            $vendor = trim((string)$product->vendor);
-        }
-
-        $groupIdNormalized = strtoupper($groupId);
-        $vendorNormalized = strtoupper($vendor);
-
-        fwrite(STDERR, "DEBUG groupId=[{$groupId}] vendor=[{$vendor}]\n");
-
-        if ($groupIdNormalized === 'PHILIPS' || $vendorNormalized === 'PHILIPS') {
+        if ($groupId === 'PHILIPS' || $vendor === 'PHILIPS') {
             $products[] = $product->asXML();
         }
     }
