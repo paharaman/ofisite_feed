@@ -6,13 +6,9 @@ $baseUrl = 'https://b2b.also.com/invoke/ActDelivery_HTTP.Inbound/receiveXML_API'
 $user = getenv('ALSO_USER');
 $pass = getenv('ALSO_PASS');
 
-$maxCategory = 2;
-$maxGroup = 3;
-$maxProperty = 5;
-
-// $maxCategory = 21;
-// $maxGroup = 14;
-// $maxProperty = 27;
+$maxCategory = 21;
+$maxGroup = 14;
+$maxProperty = 27;
 
 function fetchXml(string $url): ?string
 {
