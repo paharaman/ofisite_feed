@@ -13,6 +13,8 @@ $maxCategory = 21;
 $maxGroup = 14;
 $maxProperty = 27;
 
+$maxRequests = 200; 
+
 // safety limit, за да не виси безкрайно
 $maxRequests = 1200;
 
