@@ -10,9 +10,9 @@ $user = getenv('ALSO_USER');
 $pass = getenv('ALSO_PASS');
 
 // start from first known Philips-containing feed
-$startCategory = 2;
-$startGroup = 7;
-$startProperty = 22;
+$startCategory = 6;
+$startGroup = 1;
+$startProperty = 1;
 
 $maxCategory = 21;
 $maxGroup = 14;
