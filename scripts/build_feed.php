@@ -219,14 +219,14 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
         }
 
         if (!$groupHadAnyValidFeed) {
-            logLine("  Group {$g} had no valid non-empty feeds -> break group loop");
-            break;
+            logLine("  Group {$g} had no valid non-empty feeds -> continue group loop");
+            continue;
         }
     }
 
     if (!$categoryHadAnyValidFeed) {
-        logLine("Category {$c} had no valid non-empty feeds -> break category loop");
-        break;
+        logLine("Category {$c} had no valid non-empty feeds -> continue category loop");
+        continue;
     }
 }
 
