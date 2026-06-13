@@ -145,6 +145,7 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
 
         $propertyStart = ($c === $startCategory && $g === $startGroup) ? $startProperty : 1;
 
+        $missingInRow = 0; //гледаме дали има повечко празни фийдове, за да не минаваме през всички излишно
         for ($p = $propertyStart; $p <= $maxProperty; $p++) {
             if ($totalRequests >= $maxRequests) {
                 logLine("Reached maxRequests={$maxRequests}, stopping");
@@ -175,10 +176,20 @@ for ($c = $startCategory; $c <= $maxCategory; $c++) {
 
             if (isMissingFeed($xml)) {
                 $totalMissingFeeds++;
-                logLine("    {$propertyId} -> missing feed, break property loop");
-                break;
+                $missingInRow++;
+            
+                logLine("    {$propertyId} -> missing feed ({$missingInRow} in row)");
+            
+                if ($missingInRow >= 3) {
+                    logLine("    {$propertyId} -> 3 missing feeds in row, break property loop");
+                    break;
+                }
+            
+                continue;
             }
-
+            
+            $missingInRow = 0;
+            
             $itemsCollected = getItemsCollectedFromXml($xml);
 
             if ($itemsCollected === 0) {
