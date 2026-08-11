@@ -19,7 +19,7 @@ $maxGroup = 14;
 $maxProperty = 27;
 
 // лимит за заявки на един run
-$maxRequests = 300;
+$maxRequests = 2000;
 
 if (!$user || !$pass) {
     fwrite(STDERR, "Missing ALSO_USER or ALSO_PASS environment variables\n");
