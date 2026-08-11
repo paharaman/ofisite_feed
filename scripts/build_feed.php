@@ -10,7 +10,7 @@ $user = getenv('ALSO_USER');
 $pass = getenv('ALSO_PASS');
 
 // старт от първия потвърден работещ Philips feed
-$startCategory = 6;
+$startCategory = 1;
 $startGroup = 1;
 $startProperty = 1;
 
