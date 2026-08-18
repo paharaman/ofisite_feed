@@ -20,10 +20,7 @@ if (!$user || !$pass) {
 | INDEX URL
 |--------------------------------------------------------------------------
 |
-| Това е индексният endpoint, който вече използваме.
-|
-| CatalogGroupId=PHILIPS тук НЕ го приемаме като brand filter.
-| Просто запазваме известния работещ индексен URL.
+| Използваме познатия индексен XML.
 |
 */
 
@@ -39,84 +36,124 @@ $indexUrl = $baseUrl
 | TARGET RULES
 |--------------------------------------------------------------------------
 |
-| target:
-|   Името, което търсим в XML индекса.
+| Структура:
+|
+| productCategory
+|   -> productGroup
+|       -> propertyGroupId
+|           -> brand rules
+|
+| '*' означава "всички productGroup/propertyGroupId в тази productCategory".
 |
 | entity_brands:
-|   Стойности, които търсим в groupId и vendor.
+|   търсим в groupId и vendor
 |
 | name_brands:
-|   Стойности, които търсим в <name>.
-|
-| Важно:
-| TP Vision / MMD продуктите често се продават с PHILIPS в името.
+|   търсим в името на продукта
 |
 */
 
 $targetRules = [
 
-    'Телевизори' => [
-        'entity_brands' => [
-            'TP VISION',
-            'TCL',
+    'Аудио, Видео, Дисплеи и Телевизори' => [
+
+        'Телевизори' => [
+
+            'Телевизори' => [
+                'entity_brands' => [
+                    'TP VISION',
+                    'TCL',
+                ],
+                'name_brands' => [
+                    'PHILIPS',
+                    'TP VISION',
+                    'TCL',
+                ],
+            ],
+
         ],
-        'name_brands' => [
-            'PHILIPS',
-            'TP VISION',
-            'TCL',
+
+        'Слушалки и Микрофони' => [
+
+            'Консюмър и гейминг слушалки' => [
+                'entity_brands' => [
+                    'TP VISION',
+                ],
+                'name_brands' => [
+                    'PHILIPS',
+                    'TP VISION',
+                ],
+            ],
+
         ],
+
+        'Дисплеи' => [
+
+            'Бизнес монитори' => [
+                'entity_brands' => [
+                    'MMD',
+                    'AOC',
+                ],
+                'name_brands' => [
+                    'PHILIPS',
+                    'MMD',
+                    'AOC',
+                ],
+            ],
+
+            'Консюмър и гейминг монитори' => [
+                'entity_brands' => [
+                    'MMD',
+                    'AOC',
+                ],
+                'name_brands' => [
+                    'PHILIPS',
+                    'MMD',
+                    'AOC',
+                ],
+            ],
+
+        ],
+
     ],
 
-    'Консюмър и гейминг слушалки' => [
-        'entity_brands' => [
-            'TP VISION',
-        ],
-        'name_brands' => [
-            'PHILIPS',
-            'TP VISION',
-        ],
-    ],
+    /*
+     * За тези две productCategory вземаме всички реални feed-ове
+     * от категорията и вътре търсим Philips.
+     */
 
-    'Бизнес монитори' => [
-        'entity_brands' => [
-            'MMD',
-            'AOC',
-        ],
-        'name_brands' => [
-            'PHILIPS',
-            'MMD',
-            'AOC',
-        ],
-    ],
+    'Уреди за личнa грижa' => [
 
-    'Консюмър и гейминг монитори' => [
-        'entity_brands' => [
-            'MMD',
-            'AOC',
-        ],
-        'name_brands' => [
-            'PHILIPS',
-            'MMD',
-            'AOC',
-        ],
-    ],
+        '*' => [
 
-    'Уреди за лична грижа' => [
-        'entity_brands' => [
-            'PHILIPS',
+            '*' => [
+                'entity_brands' => [
+                    'PHILIPS',
+                ],
+                'name_brands' => [
+                    'PHILIPS',
+                ],
+            ],
+
         ],
-        'name_brands' => [
-            'PHILIPS',
-        ],
+
     ],
 
     'Уреди за дома' => [
-        'entity_brands' => [
-            'PHILIPS',
+
+        '*' => [
+
+            '*' => [
+                'entity_brands' => [
+                    'PHILIPS',
+                ],
+                'name_brands' => [
+                    'PHILIPS',
+                ],
+            ],
+
         ],
-        'name_brands' => [
-            'PHILIPS',
-        ],
+
     ],
 
 ];
@@ -151,6 +188,7 @@ function fetchXml(string $url): ?string
         CURLOPT_CONNECTTIMEOUT => 3,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_SSL_VERIFYPEER => true,
+
         CURLOPT_USERAGENT =>
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
             . 'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -170,7 +208,6 @@ function fetchXml(string $url): ?string
 
     $errno = curl_errno($ch);
     $error = curl_error($ch);
-
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
     curl_close($ch);
@@ -191,7 +228,7 @@ function fetchXml(string $url): ?string
 
 /*
 |--------------------------------------------------------------------------
-| BASIC XML CHECKS
+| XML RESPONSE CHECKS
 |--------------------------------------------------------------------------
 */
 
@@ -203,6 +240,7 @@ function isLoginError(string $xml): bool
     ) !== false;
 }
 
+
 function isMissingFeed(string $xml): bool
 {
     return stripos(
@@ -210,6 +248,7 @@ function isMissingFeed(string $xml): bool
         "Can't find any materials for propertyId"
     ) !== false;
 }
+
 
 function getItemsCollectedFromXml(string $xml): int
 {
@@ -223,42 +262,13 @@ function getItemsCollectedFromXml(string $xml): int
 
 /*
 |--------------------------------------------------------------------------
-| TEXT NORMALIZATION
-|--------------------------------------------------------------------------
-|
-| TP_VISION
-| TP-VISION
-| TP VISION
-|
-| стават:
-|
-| TPVISION
-|
-*/
-
-function normalizeBrand(string $value): string
-{
-    $value = strtoupper(trim($value));
-
-    return preg_replace(
-        '/[^A-Z0-9]+/',
-        '',
-        $value
-    );
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| NORMALIZE CATEGORY/GROUP LABEL
+| NORMALIZATION
 |--------------------------------------------------------------------------
 */
 
 function normalizeLabel(string $value): string
 {
     $value = trim($value);
-
-    // collapse whitespace
     $value = preg_replace('/\s+/u', ' ', $value);
 
     return mb_strtolower($value, 'UTF-8');
@@ -266,19 +276,119 @@ function normalizeLabel(string $value): string
 
 
 /*
+ * TP_VISION
+ * TP-VISION
+ * TP VISION
+ *
+ * стават TPVISION
+ */
+
+function normalizeBrand(string $value): string
+{
+    $value = mb_strtoupper(trim($value), 'UTF-8');
+
+    return preg_replace('/[^\p{L}\p{N}]+/u', '', $value);
+}
+
+
+/*
 |--------------------------------------------------------------------------
-| FIND TARGET FEEDS FROM INDEX
+| RULE LOOKUP
+|--------------------------------------------------------------------------
+*/
+
+function getRuleForPath(
+    array $targetRules,
+    string $categoryName,
+    string $groupName,
+    string $propertyName
+): ?array {
+
+    $normalizedCategory = normalizeLabel($categoryName);
+    $normalizedGroup = normalizeLabel($groupName);
+    $normalizedProperty = normalizeLabel($propertyName);
+
+    /*
+     * Търсим category.
+     */
+
+    $categoryRule = null;
+
+    foreach ($targetRules as $category => $rule) {
+        if (normalizeLabel($category) === $normalizedCategory) {
+            $categoryRule = $rule;
+            break;
+        }
+    }
+
+    if ($categoryRule === null) {
+        return null;
+    }
+
+    /*
+     * Първо търсим точен productGroup.
+     */
+
+    $groupRule = null;
+
+    foreach ($categoryRule as $group => $rule) {
+
+        if ($group === '*') {
+            continue;
+        }
+
+        if (normalizeLabel($group) === $normalizedGroup) {
+            $groupRule = $rule;
+            break;
+        }
+    }
+
+    /*
+     * Ако няма точен group, използваме wildcard.
+     */
+
+    if ($groupRule === null && isset($categoryRule['*'])) {
+        $groupRule = $categoryRule['*'];
+    }
+
+    if ($groupRule === null) {
+        return null;
+    }
+
+    /*
+     * Търсим точен propertyGroupId.
+     */
+
+    foreach ($groupRule as $property => $rule) {
+
+        if ($property === '*') {
+            continue;
+        }
+
+        if (normalizeLabel($property) === $normalizedProperty) {
+            return $rule;
+        }
+    }
+
+    /*
+     * Wildcard propertyGroupId.
+     */
+
+    if (isset($groupRule['*'])) {
+        return $groupRule['*'];
+    }
+
+    return null;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| READ INDEX
 |--------------------------------------------------------------------------
 |
-| Връща:
-|
-| [
-|   URL => [
-|       'targets' => [...],
-|       'entity_brands' => [...],
-|       'name_brands' => [...]
-|   ]
-| ]
+| Връща само реалните feed URL-и, които отговарят
+| на зададената productCategory/productGroup/propertyGroupId структура.
 |
 */
 
@@ -299,212 +409,158 @@ function getTargetFeedsFromIndex(
     libxml_clear_errors();
 
     if (!$loaded) {
-        logLine("Could not parse index XML");
+        logLine("ERROR: Could not parse index XML");
         return [];
     }
 
-    /*
-     * Нормализираме target имената предварително.
-     */
-
-    $normalizedRules = [];
-
-    foreach ($targetRules as $target => $rule) {
-        $normalizedRules[normalizeLabel($target)] = [
-            'original_name' => $target,
-            'entity_brands' => $rule['entity_brands'],
-            'name_brands' => $rule['name_brands'],
-        ];
-    }
-
-    $feedMap = [];
+    $feeds = [];
 
     /*
-     * Минаваме по всеки productGroup.
+     * Обхождаме productCategory.
      */
 
-    $productGroups = $dom->getElementsByTagName('productGroup');
+    $categories = $dom->getElementsByTagName('productCategory');
 
-    foreach ($productGroups as $productGroup) {
+    foreach ($categories as $categoryNode) {
 
-        if (!($productGroup instanceof DOMElement)) {
+        if (!($categoryNode instanceof DOMElement)) {
             continue;
         }
 
-        $groupName = $productGroup->getAttribute('name');
-        $normalizedGroupName = normalizeLabel($groupName);
+        $categoryName = trim(
+            $categoryNode->getAttribute('name')
+        );
 
         /*
-         * В XML структурата имаме:
-         *
-         * <propertyGroupId>...</propertyGroupId>
-         * <atom:link href="..." rel="list"/>
-         *
-         * затова пазим последния propertyGroupId.
+         * Само директните productGroup children.
          */
 
-        $currentPropertyName = null;
+        foreach ($categoryNode->childNodes as $groupNode) {
 
-        foreach ($productGroup->childNodes as $child) {
-
-            if (!($child instanceof DOMElement)) {
+            if (!($groupNode instanceof DOMElement)) {
                 continue;
             }
 
-            /*
-             * propertyGroupId
-             */
-
-            if ($child->localName === 'propertyGroupId') {
-
-                $currentPropertyName = trim(
-                    $child->textContent
-                );
-
+            if ($groupNode->localName !== 'productGroup') {
                 continue;
             }
 
-            /*
-             * atom:link
-             */
-
-            if ($child->localName !== 'link') {
-                continue;
-            }
-
-            if ($child->getAttribute('rel') !== 'list') {
-                continue;
-            }
-
-            $href = trim(
-                $child->getAttribute('href')
+            $groupName = trim(
+                $groupNode->getAttribute('name')
             );
 
-            if ($href === '') {
-                continue;
-            }
-
             /*
-             * Проверяваме дали target rule съвпада:
+             * Форматът е:
              *
-             * 1. с propertyGroupId
-             * ИЛИ
-             * 2. с productGroup name
+             * <propertyGroupId>...</propertyGroupId>
+             * <atom:link .../>
              *
-             * Това ни прави по-гъвкави при
-             * "Уреди за дома" / "Уреди за лична грижа".
+             * Затова пазим последния propertyGroupId.
              */
 
-            $normalizedPropertyName = $currentPropertyName !== null
-                ? normalizeLabel($currentPropertyName)
-                : '';
+            $currentPropertyName = null;
 
-            $matchedRule = null;
+            foreach ($groupNode->childNodes as $child) {
 
-            if (
-                isset(
-                    $normalizedRules[
-                        $normalizedPropertyName
-                    ]
-                )
-            ) {
-                $matchedRule =
-                    $normalizedRules[
-                        $normalizedPropertyName
-                    ];
+                if (!($child instanceof DOMElement)) {
+                    continue;
+                }
 
-            } elseif (
-                isset(
-                    $normalizedRules[
-                        $normalizedGroupName
-                    ]
-                )
-            ) {
-                $matchedRule =
-                    $normalizedRules[
-                        $normalizedGroupName
-                    ];
-            }
+                /*
+                 * propertyGroupId
+                 */
 
-            if ($matchedRule === null) {
-                continue;
-            }
+                if ($child->localName === 'propertyGroupId') {
 
-            /*
-             * Ако един URL попадне в повече от едно правило,
-             * обединяваме brand правилата.
-             */
+                    $currentPropertyName = trim(
+                        $child->textContent
+                    );
 
-            if (!isset($feedMap[$href])) {
-                $feedMap[$href] = [
-                    'targets' => [],
-                    'entity_brands' => [],
-                    'name_brands' => [],
+                    continue;
+                }
+
+                /*
+                 * atom:link
+                 */
+
+                if ($child->localName !== 'link') {
+                    continue;
+                }
+
+                if ($child->getAttribute('rel') !== 'list') {
+                    continue;
+                }
+
+                if ($currentPropertyName === null) {
+                    continue;
+                }
+
+                $rule = getRuleForPath(
+                    $targetRules,
+                    $categoryName,
+                    $groupName,
+                    $currentPropertyName
+                );
+
+                if ($rule === null) {
+                    continue;
+                }
+
+                $href = trim(
+                    $child->getAttribute('href')
+                );
+
+                if ($href === '') {
+                    continue;
+                }
+
+                /*
+                 * Не използваме credentials от XML href-а.
+                 * Вземаме само propertyId и конструираме URL сами.
+                 */
+
+                $query = parse_url(
+                    html_entity_decode($href),
+                    PHP_URL_QUERY
+                );
+
+                parse_str($query ?? '', $params);
+
+                if (empty($params['propertyId'])) {
+                    continue;
+                }
+
+                $propertyId = trim(
+                    $params['propertyId']
+                );
+
+                /*
+                 * propertyId е уникален ключ.
+                 */
+
+                $feeds[$propertyId] = [
+                    'category' => $categoryName,
+                    'group' => $groupName,
+                    'property' => $currentPropertyName,
+
+                    'entity_brands' =>
+                        $rule['entity_brands'] ?? [],
+
+                    'name_brands' =>
+                        $rule['name_brands'] ?? [],
                 ];
-            }
-
-            $feedMap[$href]['targets'][] =
-                $matchedRule['original_name'];
-
-            foreach (
-                $matchedRule['entity_brands']
-                as $brand
-            ) {
-                $feedMap[$href]['entity_brands'][] =
-                    $brand;
-            }
-
-            foreach (
-                $matchedRule['name_brands']
-                as $brand
-            ) {
-                $feedMap[$href]['name_brands'][] =
-                    $brand;
             }
         }
     }
 
-    /*
-     * Премахваме дублирани brand rules.
-     */
-
-    foreach ($feedMap as &$feed) {
-
-        $feed['targets'] = array_values(
-            array_unique(
-                $feed['targets']
-            )
-        );
-
-        $feed['entity_brands'] = array_values(
-            array_unique(
-                $feed['entity_brands']
-            )
-        );
-
-        $feed['name_brands'] = array_values(
-            array_unique(
-                $feed['name_brands']
-            )
-        );
-    }
-
-    unset($feed);
-
-    return $feedMap;
+    return $feeds;
 }
+
 
 /*
 |--------------------------------------------------------------------------
 | PRODUCT FILTER
 |--------------------------------------------------------------------------
-|
-| Проверяваме:
-|
-| groupId
-| vendor
-| name
-|
 */
 
 function getMatchingProductsXml(
@@ -531,22 +587,40 @@ function getMatchingProductsXml(
     }
 
     /*
-     * Нормализираме allowed brands.
+     * Нормализираме brand rules предварително.
      */
 
     $normalizedEntityBrands = [];
 
     foreach ($entityBrands as $brand) {
-        $normalizedEntityBrands[] =
-            normalizeBrand($brand);
+
+        $normalized = normalizeBrand($brand);
+
+        if ($normalized !== '') {
+            $normalizedEntityBrands[] = $normalized;
+        }
     }
+
+    $normalizedEntityBrands = array_unique(
+        $normalizedEntityBrands
+    );
+
 
     $normalizedNameBrands = [];
 
     foreach ($nameBrands as $brand) {
-        $normalizedNameBrands[] =
-            normalizeBrand($brand);
+
+        $normalized = normalizeBrand($brand);
+
+        if ($normalized !== '') {
+            $normalizedNameBrands[] = $normalized;
+        }
     }
+
+    $normalizedNameBrands = array_unique(
+        $normalizedNameBrands
+    );
+
 
     $nodes = $dom->getElementsByTagName('product');
 
@@ -564,6 +638,7 @@ function getMatchingProductsXml(
             $node->getAttribute('groupId')
         );
 
+
         /*
          * vendor
          */
@@ -574,12 +649,14 @@ function getMatchingProductsXml(
             $node->getElementsByTagName('vendor');
 
         if ($vendorNodes->length > 0) {
+
             $vendor = normalizeBrand(
                 $vendorNodes
                     ->item(0)
                     ->textContent
             );
         }
+
 
         /*
          * name
@@ -591,6 +668,7 @@ function getMatchingProductsXml(
             $node->getElementsByTagName('name');
 
         if ($nameNodes->length > 0) {
+
             $name = normalizeBrand(
                 $nameNodes
                     ->item(0)
@@ -598,16 +676,15 @@ function getMatchingProductsXml(
             );
         }
 
+
         $matched = false;
 
+
         /*
-         * Match groupId/vendor
+         * 1. groupId / vendor
          */
 
-        foreach (
-            $normalizedEntityBrands
-            as $brand
-        ) {
+        foreach ($normalizedEntityBrands as $brand) {
 
             if (
                 $groupId === $brand ||
@@ -618,17 +695,14 @@ function getMatchingProductsXml(
             }
         }
 
+
         /*
-         * Ако няма match,
-         * проверяваме product name.
+         * 2. product name
          */
 
         if (!$matched) {
 
-            foreach (
-                $normalizedNameBrands
-                as $brand
-            ) {
+            foreach ($normalizedNameBrands as $brand) {
 
                 if (
                     $brand !== '' &&
@@ -640,7 +714,9 @@ function getMatchingProductsXml(
             }
         }
 
+
         if ($matched) {
+
             $products[] =
                 $dom->saveXML($node);
         }
@@ -657,27 +733,33 @@ function getMatchingProductsXml(
 */
 
 logLine("START");
-logLine("Loading catalog index...");
+logLine("Loading ALSO catalog index...");
 
 $indexXml = fetchXml($indexUrl);
 
-if (
-    $indexXml === null ||
-    $indexXml === ''
-) {
-    logLine("Could not load catalog index");
+if ($indexXml === null || $indexXml === '') {
+
+    logLine(
+        "ERROR: Could not load catalog index"
+    );
+
     exit(1);
 }
 
+
 if (isLoginError($indexXml)) {
-    logLine("LOGIN ERROR while loading index");
+
+    logLine(
+        "ERROR: Login error while loading catalog index"
+    );
+
     exit(1);
 }
 
 
 /*
 |--------------------------------------------------------------------------
-| BUILD TARGET FEED LIST
+| BUILD FEED MAP
 |--------------------------------------------------------------------------
 */
 
@@ -686,30 +768,25 @@ $feeds = getTargetFeedsFromIndex(
     $targetRules
 );
 
-if (count($feeds) === 0) {
-    logLine(
-        "ERROR: no target feeds found in catalog index"
-    );
 
-    /*
-     * Много важно:
-     *
-     * Не генерираме празен feed при проблем
-     * с индекса.
-     */
+if (count($feeds) === 0) {
+
+    logLine(
+        "ERROR: No matching feeds found in catalog index"
+    );
 
     exit(1);
 }
 
+
 logLine(
-    "Target feeds found: "
-    . count($feeds)
+    "Target feeds found: " . count($feeds)
 );
 
 
 /*
 |--------------------------------------------------------------------------
-| PROCESS TARGET FEEDS
+| PROCESS FEEDS
 |--------------------------------------------------------------------------
 */
 
@@ -721,26 +798,36 @@ $totalValidFeeds = 0;
 $totalEmptyFeeds = 0;
 $totalFailedFeeds = 0;
 
-foreach ($feeds as $url => $feedRule) {
+
+foreach ($feeds as $propertyId => $feedRule) {
 
     $totalRequests++;
 
-    $targets = implode(
-        ', ',
-        $feedRule['targets']
+    logLine(
+        "Request {$totalRequests}: {$propertyId}"
     );
 
     logLine(
-        "Request {$totalRequests}: "
-        . $targets
+        "    "
+        . $feedRule['category']
+        . " > "
+        . $feedRule['group']
+        . " > "
+        . $feedRule['property']
     );
+
+
+    $url = $baseUrl
+        . '?j_u=' . urlencode($user)
+        . '&j_p=' . urlencode($pass)
+        . '&propertyId=' . urlencode($propertyId);
+
 
     $xml = fetchXml($url);
 
-    if (
-        $xml === null ||
-        $xml === ''
-    ) {
+
+    if ($xml === null || $xml === '') {
+
         $totalFailedFeeds++;
 
         logLine(
@@ -750,7 +837,9 @@ foreach ($feeds as $url => $feedRule) {
         continue;
     }
 
+
     if (isLoginError($xml)) {
+
         logLine(
             "    -> LOGIN ERROR, stopping"
         );
@@ -758,7 +847,9 @@ foreach ($feeds as $url => $feedRule) {
         exit(1);
     }
 
+
     if (isMissingFeed($xml)) {
+
         $totalFailedFeeds++;
 
         logLine(
@@ -768,8 +859,10 @@ foreach ($feeds as $url => $feedRule) {
         continue;
     }
 
+
     $itemsCollected =
         getItemsCollectedFromXml($xml);
+
 
     if ($itemsCollected === 0) {
 
@@ -782,6 +875,7 @@ foreach ($feeds as $url => $feedRule) {
         continue;
     }
 
+
     if ($itemsCollected < 0) {
 
         $totalFailedFeeds++;
@@ -793,7 +887,9 @@ foreach ($feeds as $url => $feedRule) {
         continue;
     }
 
+
     $totalValidFeeds++;
+
 
     $matchedProducts =
         getMatchingProductsXml(
@@ -802,19 +898,19 @@ foreach ($feeds as $url => $feedRule) {
             $feedRule['name_brands']
         );
 
-    $count = count(
-        $matchedProducts
-    );
+
+    $count =
+        count($matchedProducts);
+
 
     logLine(
         "    -> ItemsCollected={$itemsCollected}, "
-        . "matched products={$count}"
+        . "matched={$count}"
     );
 
-    foreach (
-        $matchedProducts
-        as $productXml
-    ) {
+
+    foreach ($matchedProducts as $productXml) {
+
         $productXmlList[] =
             $productXml;
 
@@ -828,17 +924,18 @@ foreach ($feeds as $url => $feedRule) {
 | SAFETY CHECK
 |--------------------------------------------------------------------------
 |
-| Ако не намерим НИТО един продукт,
-| не искаме случайно да заменим
-| работещия feed с празен.
+| Не публикуваме празен feed при проблем.
 |
 */
 
 if ($totalProducts === 0) {
 
     logLine(
-        "ERROR: 0 matching products found. "
-        . "feed.xml will NOT be overwritten."
+        "ERROR: 0 matching products found."
+    );
+
+    logLine(
+        "feed.xml will NOT be overwritten."
     );
 
     exit(1);
@@ -847,7 +944,7 @@ if ($totalProducts === 0) {
 
 /*
 |--------------------------------------------------------------------------
-| CREATE OUTPUT XML
+| CREATE OUTPUT
 |--------------------------------------------------------------------------
 */
 
@@ -876,6 +973,7 @@ $output .=
 $docsDir =
     __DIR__ . '/../docs';
 
+
 if (!is_dir($docsDir)) {
 
     mkdir(
@@ -885,17 +983,21 @@ if (!is_dir($docsDir)) {
     );
 }
 
+
 $targetFile =
     $docsDir . '/feed.xml';
+
 
 $result = file_put_contents(
     $targetFile,
     $output
 );
 
+
 if ($result === false) {
+
     logLine(
-        "ERROR: could not write feed.xml"
+        "ERROR: Could not write feed.xml"
     );
 
     exit(1);
@@ -911,12 +1013,12 @@ if ($result === false) {
 logLine("DONE");
 
 logLine(
-    "Index target feeds: "
+    "Target feeds: "
     . count($feeds)
 );
 
 logLine(
-    "Feed requests: {$totalRequests}"
+    "Requests: {$totalRequests}"
 );
 
 logLine(
