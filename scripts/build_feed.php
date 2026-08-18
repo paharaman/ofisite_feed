@@ -6,25 +6,127 @@ ini_set('zlib.output_compression', '0');
 ob_implicit_flush(true);
 
 $baseUrl = 'https://b2b.also.com/invoke/ActDelivery_HTTP.Inbound/receiveXML_API';
+
 $user = getenv('ALSO_USER');
 $pass = getenv('ALSO_PASS');
-
-// старт от първия потвърден работещ Philips feed
-$startCategory = 1;
-$startGroup = 1;
-$startProperty = 1;
-
-$maxCategory = 21;
-$maxGroup = 14;
-$maxProperty = 27;
-
-// лимит за заявки на един run
-$maxRequests = 2000;
 
 if (!$user || !$pass) {
     fwrite(STDERR, "Missing ALSO_USER or ALSO_PASS environment variables\n");
     exit(1);
 }
+
+/*
+|--------------------------------------------------------------------------
+| INDEX URL
+|--------------------------------------------------------------------------
+|
+| Това е индексният endpoint, който вече използваме.
+|
+| CatalogGroupId=PHILIPS тук НЕ го приемаме като brand filter.
+| Просто запазваме известния работещ индексен URL.
+|
+*/
+
+$indexUrl = $baseUrl
+    . '?CatalogCategory=true'
+    . '&CatalogGroupId=PHILIPS'
+    . '&j_u=' . urlencode($user)
+    . '&j_p=' . urlencode($pass);
+
+
+/*
+|--------------------------------------------------------------------------
+| TARGET RULES
+|--------------------------------------------------------------------------
+|
+| target:
+|   Името, което търсим в XML индекса.
+|
+| entity_brands:
+|   Стойности, които търсим в groupId и vendor.
+|
+| name_brands:
+|   Стойности, които търсим в <name>.
+|
+| Важно:
+| TP Vision / MMD продуктите често се продават с PHILIPS в името.
+|
+*/
+
+$targetRules = [
+
+    'Телевизори' => [
+        'entity_brands' => [
+            'TP VISION',
+            'TCL',
+        ],
+        'name_brands' => [
+            'PHILIPS',
+            'TP VISION',
+            'TCL',
+        ],
+    ],
+
+    'Консюмър и гейминг слушалки' => [
+        'entity_brands' => [
+            'TP VISION',
+        ],
+        'name_brands' => [
+            'PHILIPS',
+            'TP VISION',
+        ],
+    ],
+
+    'Бизнес монитори' => [
+        'entity_brands' => [
+            'MMD',
+            'AOC',
+        ],
+        'name_brands' => [
+            'PHILIPS',
+            'MMD',
+            'AOC',
+        ],
+    ],
+
+    'Консюмър и гейминг монитори' => [
+        'entity_brands' => [
+            'MMD',
+            'AOC',
+        ],
+        'name_brands' => [
+            'PHILIPS',
+            'MMD',
+            'AOC',
+        ],
+    ],
+
+    'Уреди за лична грижа' => [
+        'entity_brands' => [
+            'PHILIPS',
+        ],
+        'name_brands' => [
+            'PHILIPS',
+        ],
+    ],
+
+    'Уреди за дома' => [
+        'entity_brands' => [
+            'PHILIPS',
+        ],
+        'name_brands' => [
+            'PHILIPS',
+        ],
+    ],
+
+];
+
+
+/*
+|--------------------------------------------------------------------------
+| LOG
+|--------------------------------------------------------------------------
+*/
 
 function logLine(string $message): void
 {
@@ -32,18 +134,31 @@ function logLine(string $message): void
     fwrite(STDERR, "[{$time}] {$message}\n");
 }
 
+
+/*
+|--------------------------------------------------------------------------
+| HTTP
+|--------------------------------------------------------------------------
+*/
+
 function fetchXml(string $url): ?string
 {
     $ch = curl_init($url);
+
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 5,
-        CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_TIMEOUT => 10,
+        CURLOPT_CONNECTTIMEOUT => 3,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
+        CURLOPT_USERAGENT =>
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+            . 'AppleWebKit/537.36 (KHTML, like Gecko) '
+            . 'Chrome/122.0 Safari/537.36',
+
         CURLOPT_HTTPGET => true,
         CURLOPT_ENCODING => '',
+
         CURLOPT_HTTPHEADER => [
             'Accept: application/xml,text/xml,*/*',
             'Cache-Control: no-cache',
@@ -52,9 +167,12 @@ function fetchXml(string $url): ?string
     ]);
 
     $response = curl_exec($ch);
+
     $errno = curl_errno($ch);
     $error = curl_error($ch);
+
     $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
     curl_close($ch);
 
     if ($response === false) {
@@ -70,14 +188,27 @@ function fetchXml(string $url): ?string
     return trim($response);
 }
 
+
+/*
+|--------------------------------------------------------------------------
+| BASIC XML CHECKS
+|--------------------------------------------------------------------------
+*/
+
 function isLoginError(string $xml): bool
 {
-    return stripos($xml, 'Login error. Please check provided login') !== false;
+    return stripos(
+        $xml,
+        'Login error. Please check provided login'
+    ) !== false;
 }
 
 function isMissingFeed(string $xml): bool
 {
-    return stripos($xml, "Can't find any materials for propertyId") !== false;
+    return stripos(
+        $xml,
+        "Can't find any materials for propertyId"
+    ) !== false;
 }
 
 function getItemsCollectedFromXml(string $xml): int
@@ -89,162 +220,717 @@ function getItemsCollectedFromXml(string $xml): int
     return -1;
 }
 
-function getPhilipsProductsXml(string $xml): array
+
+/*
+|--------------------------------------------------------------------------
+| TEXT NORMALIZATION
+|--------------------------------------------------------------------------
+|
+| TP_VISION
+| TP-VISION
+| TP VISION
+|
+| стават:
+|
+| TPVISION
+|
+*/
+
+function normalizeBrand(string $value): string
 {
+    $value = strtoupper(trim($value));
+
+    return preg_replace(
+        '/[^A-Z0-9]+/',
+        '',
+        $value
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| NORMALIZE CATEGORY/GROUP LABEL
+|--------------------------------------------------------------------------
+*/
+
+function normalizeLabel(string $value): string
+{
+    $value = trim($value);
+
+    // collapse whitespace
+    $value = preg_replace('/\s+/u', ' ', $value);
+
+    return mb_strtolower($value, 'UTF-8');
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| FIND TARGET FEEDS FROM INDEX
+|--------------------------------------------------------------------------
+|
+| Връща:
+|
+| [
+|   URL => [
+|       'targets' => [...],
+|       'entity_brands' => [...],
+|       'name_brands' => [...]
+|   ]
+| ]
+|
+*/
+
+function getTargetFeedsFromIndex(
+    string $xml,
+    array $targetRules
+): array {
+
+    $dom = new DOMDocument();
+
+    libxml_use_internal_errors(true);
+
+    $loaded = $dom->loadXML(
+        $xml,
+        LIBXML_NOCDATA | LIBXML_NONET
+    );
+
+    libxml_clear_errors();
+
+    if (!$loaded) {
+        logLine("Could not parse index XML");
+        return [];
+    }
+
+    /*
+     * Нормализираме target имената предварително.
+     */
+
+    $normalizedRules = [];
+
+    foreach ($targetRules as $target => $rule) {
+        $normalizedRules[normalizeLabel($target)] = [
+            'original_name' => $target,
+            'entity_brands' => $rule['entity_brands'],
+            'name_brands' => $rule['name_brands'],
+        ];
+    }
+
+    $feedMap = [];
+
+    /*
+     * Минаваме по всеки productGroup.
+     */
+
+    $productGroups = $dom->getElementsByTagName('productGroup');
+
+    foreach ($productGroups as $productGroup) {
+
+        if (!($productGroup instanceof DOMElement)) {
+            continue;
+        }
+
+        $groupName = $productGroup->getAttribute('name');
+        $normalizedGroupName = normalizeLabel($groupName);
+
+        /*
+         * В XML структурата имаме:
+         *
+         * <propertyGroupId>...</propertyGroupId>
+         * <atom:link href="..." rel="list"/>
+         *
+         * затова пазим последния propertyGroupId.
+         */
+
+        $currentPropertyName = null;
+
+        foreach ($productGroup->childNodes as $child) {
+
+            if (!($child instanceof DOMElement)) {
+                continue;
+            }
+
+            /*
+             * propertyGroupId
+             */
+
+            if ($child->localName === 'propertyGroupId') {
+
+                $currentPropertyName = trim(
+                    $child->textContent
+                );
+
+                continue;
+            }
+
+            /*
+             * atom:link
+             */
+
+            if ($child->localName !== 'link') {
+                continue;
+            }
+
+            if ($child->getAttribute('rel') !== 'list') {
+                continue;
+            }
+
+            $href = trim(
+                $child->getAttribute('href')
+            );
+
+            if ($href === '') {
+                continue;
+            }
+
+            /*
+             * Проверяваме дали target rule съвпада:
+             *
+             * 1. с propertyGroupId
+             * ИЛИ
+             * 2. с productGroup name
+             *
+             * Това ни прави по-гъвкави при
+             * "Уреди за дома" / "Уреди за лична грижа".
+             */
+
+            $normalizedPropertyName = $currentPropertyName !== null
+                ? normalizeLabel($currentPropertyName)
+                : '';
+
+            $matchedRule = null;
+
+            if (
+                isset(
+                    $normalizedRules[
+                        $normalizedPropertyName
+                    ]
+                )
+            ) {
+                $matchedRule =
+                    $normalizedRules[
+                        $normalizedPropertyName
+                    ];
+
+            } elseif (
+                isset(
+                    $normalizedRules[
+                        $normalizedGroupName
+                    ]
+                )
+            ) {
+                $matchedRule =
+                    $normalizedRules[
+                        $normalizedGroupName
+                    ];
+            }
+
+            if ($matchedRule === null) {
+                continue;
+            }
+
+            /*
+             * Ако един URL попадне в повече от едно правило,
+             * обединяваме brand правилата.
+             */
+
+            if (!isset($feedMap[$href])) {
+                $feedMap[$href] = [
+                    'targets' => [],
+                    'entity_brands' => [],
+                    'name_brands' => [],
+                ];
+            }
+
+            $feedMap[$href]['targets'][] =
+                $matchedRule['original_name'];
+
+            foreach (
+                $matchedRule['entity_brands']
+                as $brand
+            ) {
+                $feedMap[$href]['entity_brands'][] =
+                    $brand;
+            }
+
+            foreach (
+                $matchedRule['name_brands']
+                as $brand
+            ) {
+                $feedMap[$href]['name_brands'][] =
+                    $brand;
+            }
+        }
+    }
+
+    /*
+     * Премахваме дублирани brand rules.
+     */
+
+    foreach ($feedMap as &$feed) {
+
+        $feed['targets'] = array_values(
+            array_unique(
+                $feed['targets']
+            )
+        );
+
+        $feed['entity_brands'] = array_values(
+            array_unique(
+                $feed['entity_brands']
+            )
+        );
+
+        $feed['name_brands'] = array_values(
+            array_unique(
+                $feed['name_brands']
+            )
+        );
+    }
+
+    unset($feed);
+
+    return $feedMap;
+}
+
+/*
+|--------------------------------------------------------------------------
+| PRODUCT FILTER
+|--------------------------------------------------------------------------
+|
+| Проверяваме:
+|
+| groupId
+| vendor
+| name
+|
+*/
+
+function getMatchingProductsXml(
+    string $xml,
+    array $entityBrands,
+    array $nameBrands
+): array {
+
     $products = [];
 
     $dom = new DOMDocument();
+
     libxml_use_internal_errors(true);
 
-    $loaded = $dom->loadXML($xml, LIBXML_NOCDATA | LIBXML_NONET);
+    $loaded = $dom->loadXML(
+        $xml,
+        LIBXML_NOCDATA | LIBXML_NONET
+    );
+
     libxml_clear_errors();
 
     if (!$loaded) {
         return [];
     }
 
+    /*
+     * Нормализираме allowed brands.
+     */
+
+    $normalizedEntityBrands = [];
+
+    foreach ($entityBrands as $brand) {
+        $normalizedEntityBrands[] =
+            normalizeBrand($brand);
+    }
+
+    $normalizedNameBrands = [];
+
+    foreach ($nameBrands as $brand) {
+        $normalizedNameBrands[] =
+            normalizeBrand($brand);
+    }
+
     $nodes = $dom->getElementsByTagName('product');
 
     foreach ($nodes as $node) {
-        /** @var DOMElement $node */
-        $groupId = strtoupper(trim($node->getAttribute('groupId')));
 
-        $vendor = '';
-        $vendorNodes = $node->getElementsByTagName('vendor');
-        if ($vendorNodes->length > 0) {
-            $vendor = strtoupper(trim($vendorNodes->item(0)->textContent));
+        if (!($node instanceof DOMElement)) {
+            continue;
         }
 
-        if ($groupId === 'PHILIPS' || $vendor === 'PHILIPS') {
-            $products[] = $dom->saveXML($node);
+        /*
+         * groupId
+         */
+
+        $groupId = normalizeBrand(
+            $node->getAttribute('groupId')
+        );
+
+        /*
+         * vendor
+         */
+
+        $vendor = '';
+
+        $vendorNodes =
+            $node->getElementsByTagName('vendor');
+
+        if ($vendorNodes->length > 0) {
+            $vendor = normalizeBrand(
+                $vendorNodes
+                    ->item(0)
+                    ->textContent
+            );
+        }
+
+        /*
+         * name
+         */
+
+        $name = '';
+
+        $nameNodes =
+            $node->getElementsByTagName('name');
+
+        if ($nameNodes->length > 0) {
+            $name = normalizeBrand(
+                $nameNodes
+                    ->item(0)
+                    ->textContent
+            );
+        }
+
+        $matched = false;
+
+        /*
+         * Match groupId/vendor
+         */
+
+        foreach (
+            $normalizedEntityBrands
+            as $brand
+        ) {
+
+            if (
+                $groupId === $brand ||
+                $vendor === $brand
+            ) {
+                $matched = true;
+                break;
+            }
+        }
+
+        /*
+         * Ако няма match,
+         * проверяваме product name.
+         */
+
+        if (!$matched) {
+
+            foreach (
+                $normalizedNameBrands
+                as $brand
+            ) {
+
+                if (
+                    $brand !== '' &&
+                    strpos($name, $brand) !== false
+                ) {
+                    $matched = true;
+                    break;
+                }
+            }
+        }
+
+        if ($matched) {
+            $products[] =
+                $dom->saveXML($node);
         }
     }
 
     return $products;
 }
 
+
+/*
+|--------------------------------------------------------------------------
+| START
+|--------------------------------------------------------------------------
+*/
+
+logLine("START");
+logLine("Loading catalog index...");
+
+$indexXml = fetchXml($indexUrl);
+
+if (
+    $indexXml === null ||
+    $indexXml === ''
+) {
+    logLine("Could not load catalog index");
+    exit(1);
+}
+
+if (isLoginError($indexXml)) {
+    logLine("LOGIN ERROR while loading index");
+    exit(1);
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| BUILD TARGET FEED LIST
+|--------------------------------------------------------------------------
+*/
+
+$feeds = getTargetFeedsFromIndex(
+    $indexXml,
+    $targetRules
+);
+
+if (count($feeds) === 0) {
+    logLine(
+        "ERROR: no target feeds found in catalog index"
+    );
+
+    /*
+     * Много важно:
+     *
+     * Не генерираме празен feed при проблем
+     * с индекса.
+     */
+
+    exit(1);
+}
+
+logLine(
+    "Target feeds found: "
+    . count($feeds)
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| PROCESS TARGET FEEDS
+|--------------------------------------------------------------------------
+*/
+
 $productXmlList = [];
+
 $totalProducts = 0;
 $totalRequests = 0;
 $totalValidFeeds = 0;
 $totalEmptyFeeds = 0;
-$totalMissingFeeds = 0;
+$totalFailedFeeds = 0;
 
-logLine("START");
-logLine("Starting from X" . sprintf('%02d%03d%03d', $startCategory, $startGroup, $startProperty));
+foreach ($feeds as $url => $feedRule) {
 
-for ($c = $startCategory; $c <= $maxCategory; $c++) {
-    $categoryHadAnyValidFeed = false;
-    logLine("Category {$c} start");
+    $totalRequests++;
 
-    $groupStart = ($c === $startCategory) ? $startGroup : 1;
+    $targets = implode(
+        ', ',
+        $feedRule['targets']
+    );
 
-    for ($g = $groupStart; $g <= $maxGroup; $g++) {
-        $groupHadAnyValidFeed = false;
-        logLine("  Group {$g} start");
+    logLine(
+        "Request {$totalRequests}: "
+        . $targets
+    );
 
-        $propertyStart = ($c === $startCategory && $g === $startGroup) ? $startProperty : 1;
+    $xml = fetchXml($url);
 
-        $missingInRow = 0; //гледаме дали има повечко празни фийдове, за да не минаваме през всички излишно
-        for ($p = $propertyStart; $p <= $maxProperty; $p++) {
-            if ($totalRequests >= $maxRequests) {
-                logLine("Reached maxRequests={$maxRequests}, stopping");
-                break 3;
-            }
+    if (
+        $xml === null ||
+        $xml === ''
+    ) {
+        $totalFailedFeeds++;
 
-            $propertyId = sprintf('X%02d%03d%03d', $c, $g, $p);
+        logLine(
+            "    -> null/empty response"
+        );
 
-            $url = $baseUrl
-                . '?j_u=' . urlencode($user)
-                . '&j_p=' . urlencode($pass)
-                . '&propertyId=' . urlencode($propertyId);
-
-            $totalRequests++;
-            logLine("    Request {$totalRequests}: {$propertyId}");
-
-            $xml = fetchXml($url);
-
-            if ($xml === null || $xml === '') {
-                logLine("    {$propertyId} -> null/empty response");
-                continue;
-            }
-
-            if (isLoginError($xml)) {
-                logLine("    {$propertyId} -> LOGIN ERROR, stopping script");
-                break 3;
-            }
-
-            if (isMissingFeed($xml)) {
-                $totalMissingFeeds++;
-                $missingInRow++;
-            
-                logLine("    {$propertyId} -> missing feed ({$missingInRow} in row)");
-            
-                if ($missingInRow >= 3) {
-                    logLine("    {$propertyId} -> 3 missing feeds in row, break property loop");
-                    break;
-                }
-            
-                continue;
-            }
-            
-            $missingInRow = 0;
-            
-            $itemsCollected = getItemsCollectedFromXml($xml);
-
-            if ($itemsCollected === 0) {
-                $totalEmptyFeeds++;
-                logLine("    {$propertyId} -> empty feed");
-                continue;
-            }
-
-            if ($itemsCollected < 0) {
-                logLine("    {$propertyId} -> could not read ItemsCollected");
-                continue;
-            }
-
-            $groupHadAnyValidFeed = true;
-            $categoryHadAnyValidFeed = true;
-            $totalValidFeeds++;
-
-            $philipsProducts = getPhilipsProductsXml($xml);
-            $count = count($philipsProducts);
-
-            logLine("    {$propertyId} -> valid feed, Philips products: {$count}");
-
-            foreach ($philipsProducts as $productXml) {
-                $productXmlList[] = $productXml;
-                $totalProducts++;
-            }
-        }
-
-        if (!$groupHadAnyValidFeed) {
-            logLine("  Group {$g} had no valid non-empty feeds -> continue group loop");
-            continue;
-        }
-    }
-
-    if (!$categoryHadAnyValidFeed) {
-        logLine("Category {$c} had no valid non-empty feeds -> continue category loop");
         continue;
     }
+
+    if (isLoginError($xml)) {
+        logLine(
+            "    -> LOGIN ERROR, stopping"
+        );
+
+        exit(1);
+    }
+
+    if (isMissingFeed($xml)) {
+        $totalFailedFeeds++;
+
+        logLine(
+            "    -> feed no longer exists"
+        );
+
+        continue;
+    }
+
+    $itemsCollected =
+        getItemsCollectedFromXml($xml);
+
+    if ($itemsCollected === 0) {
+
+        $totalEmptyFeeds++;
+
+        logLine(
+            "    -> empty feed"
+        );
+
+        continue;
+    }
+
+    if ($itemsCollected < 0) {
+
+        $totalFailedFeeds++;
+
+        logLine(
+            "    -> could not read ItemsCollected"
+        );
+
+        continue;
+    }
+
+    $totalValidFeeds++;
+
+    $matchedProducts =
+        getMatchingProductsXml(
+            $xml,
+            $feedRule['entity_brands'],
+            $feedRule['name_brands']
+        );
+
+    $count = count(
+        $matchedProducts
+    );
+
+    logLine(
+        "    -> ItemsCollected={$itemsCollected}, "
+        . "matched products={$count}"
+    );
+
+    foreach (
+        $matchedProducts
+        as $productXml
+    ) {
+        $productXmlList[] =
+            $productXml;
+
+        $totalProducts++;
+    }
 }
 
-$output = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-$output .= "<productSet version=\"1.7\" ItemsCollected=\"{$totalProducts}\">\n";
-$output .= implode("\n", $productXmlList);
-$output .= "\n</productSet>\n";
 
-$docsDir = __DIR__ . '/../docs';
+/*
+|--------------------------------------------------------------------------
+| SAFETY CHECK
+|--------------------------------------------------------------------------
+|
+| Ако не намерим НИТО един продукт,
+| не искаме случайно да заменим
+| работещия feed с празен.
+|
+*/
+
+if ($totalProducts === 0) {
+
+    logLine(
+        "ERROR: 0 matching products found. "
+        . "feed.xml will NOT be overwritten."
+    );
+
+    exit(1);
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| CREATE OUTPUT XML
+|--------------------------------------------------------------------------
+*/
+
+$output =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+
+$output .=
+    "<productSet version=\"1.7\" "
+    . "ItemsCollected=\"{$totalProducts}\">\n";
+
+$output .= implode(
+    "\n",
+    $productXmlList
+);
+
+$output .=
+    "\n</productSet>\n";
+
+
+/*
+|--------------------------------------------------------------------------
+| SAVE
+|--------------------------------------------------------------------------
+*/
+
+$docsDir =
+    __DIR__ . '/../docs';
+
 if (!is_dir($docsDir)) {
-    mkdir($docsDir, 0777, true);
+
+    mkdir(
+        $docsDir,
+        0777,
+        true
+    );
 }
 
-file_put_contents($docsDir . '/feed.xml', $output);
+$targetFile =
+    $docsDir . '/feed.xml';
+
+$result = file_put_contents(
+    $targetFile,
+    $output
+);
+
+if ($result === false) {
+    logLine(
+        "ERROR: could not write feed.xml"
+    );
+
+    exit(1);
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| SUMMARY
+|--------------------------------------------------------------------------
+*/
 
 logLine("DONE");
-logLine("Requests: {$totalRequests}");
-logLine("Valid feeds: {$totalValidFeeds}");
-logLine("Empty feeds: {$totalEmptyFeeds}");
-logLine("Missing feeds: {$totalMissingFeeds}");
-logLine("Products: {$totalProducts}");
+
+logLine(
+    "Index target feeds: "
+    . count($feeds)
+);
+
+logLine(
+    "Feed requests: {$totalRequests}"
+);
+
+logLine(
+    "Valid feeds: {$totalValidFeeds}"
+);
+
+logLine(
+    "Empty feeds: {$totalEmptyFeeds}"
+);
+
+logLine(
+    "Failed feeds: {$totalFailedFeeds}"
+);
+
+logLine(
+    "Products: {$totalProducts}"
+);
