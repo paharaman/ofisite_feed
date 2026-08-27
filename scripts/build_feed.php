@@ -59,7 +59,7 @@ $targetRules = [
 
         'Телевизори' => [
 
-            'Телевизори' => [
+            '*' => [
                 'entity_brands' => [
                     'TP VISION',
                     'TCL',
